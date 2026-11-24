@@ -76,7 +76,8 @@ function Root() {
           </Routes>
         </Suspense>
       </BrowserRouter>
-      <Analytics />
+      {/* Vercel 统计脚本仅存在于 Vercel 部署上, GitHub Pages 下请求会 404, 故按部署环境关闭 */}
+      {REACT_APP_DEPLOY_ENV !== 'pages' && <Analytics />}
     </React.StrictMode>
   )
 }
