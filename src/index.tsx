@@ -4,7 +4,7 @@ import { ErrorBook } from './pages/ErrorBook'
 import { FriendLinks } from './pages/FriendLinks'
 import MobilePage from './pages/Mobile'
 import TypingPage from './pages/Typing'
-import { initCloudSyncOnStartup } from '@/utils/cloud-sync'
+import { initCloudSyncOnFocus, initCloudSyncOnStartup } from '@/utils/cloud-sync'
 import { isOpenDarkModeAtom } from '@/store'
 import { getDeployBasePath } from '@/utils/deployBase'
 import { Analytics } from '@vercel/analytics/react'
@@ -50,6 +50,8 @@ function Root() {
   useEffect(() => {
     // 云同步: 启动时后台拉取云端较新的数据 (可在 设置 → 数据 中配置/关闭)
     initCloudSyncOnStartup()
+    // 云同步: 切回页面时自动检查云端更新 (别的设备练完上传后, 这台电脑无需手动刷新)
+    initCloudSyncOnFocus()
   }, [])
 
   // GitHub Pages 部署时按实际访问路径推导路由 basename (上游写死了官方站仓库名)

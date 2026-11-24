@@ -155,6 +155,46 @@ export function initCloudSyncOnStartup() {
 
 let autoUploadTimer: number | undefined
 let flushListenersReady = false
+let focusListenersReady = false
+
+// 用户最近一次按键时间, 用于避免在打字过程中刷新页面
+let lastUserKeyAt = 0
+
+/**
+ * 页面重新获得焦点/重新可见时自动拉取云端数据。
+ *
+ * 场景: 在平板/手机上练完并上传后, 电脑上已经开着的页面不会自己更新(原先只在启动时拉取一次),
+ * 看起来就像"没同步"。这里在切回页面时静默检查一次, 有更新则等用户停手后再刷新。
+ */
+export function initCloudSyncOnFocus() {
+  if (focusListenersReady) return
+  focusListenersReady = true
+
+  window.addEventListener('keydown', () => { lastUserKeyAt = Date.now() }, { passive: true, capture: true })
+
+  let lastFocusSyncAt = 0
+  const syncOnReturn = () => {
+    if (document.visibilityState === 'hidden') return
+    const config = loadCloudSyncConfig()
+    if (!config.enabled || !config.autoDownload) return
+    // 60 秒内不重复检查, 避免频繁切换窗口造成请求过多
+    if (Date.now() - lastFocusSyncAt < 60 * 1000) return
+    lastFocusSyncAt = Date.now()
+
+    syncNow('auto')
+      .then((result) => {
+        if (result.outcome === 'pulled' || result.outcome === 'merged') {
+          // 用户可能正在打字, 等其停顿后再刷新, 避免打断当前练习
+          const idleWait = Math.max(0, 4000 - (Date.now() - lastUserKeyAt))
+          window.setTimeout(() => window.location.reload(), 800 + idleWait)
+        }
+      })
+      .catch(() => undefined)
+  }
+
+  window.addEventListener('focus', syncOnReturn)
+  document.addEventListener('visibilitychange', syncOnReturn)
+}
 
 function flushAutoUpload() {
   if (autoUploadTimer) {
