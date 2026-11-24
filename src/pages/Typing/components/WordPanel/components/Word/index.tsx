@@ -51,6 +51,7 @@ export default function WordComponent({ word, onFinish }: { word: Word; onFinish
 
   const [showTipAlert, setShowTipAlert] = useState(false)
   const wordPronunciationIconRef = useRef<WordPronunciationIconRef>(null)
+  const lastAutoPlayedKeyRef = useRef('')
   const saveWordRecordRef = useRef(saveWordRecord)
   saveWordRecordRef.current = saveWordRecord
   const pendingRecordRef = useRef({
@@ -186,6 +187,11 @@ export default function WordComponent({ word, onFinish }: { word: Word; onFinish
     if (!state.isTyping) return
     // Play when practice starts or the word changes. Waiting for an empty
     // input skips the reading if the first letter arrives first.
+    // 换词时 index 与 word.name 会同时变化, 去重可避免同一词重复触发两次
+    // (第二次 play 会打断第一次, 表现为偶发没有发音)
+    const autoPlayKey = `${state.chapterData.index}|${word.name}|${state.isTyping}`
+    if (lastAutoPlayedKeyRef.current === autoPlayKey) return
+    lastAutoPlayedKeyRef.current = autoPlayKey
     wordPronunciationIconRef.current?.play()
   }, [state.isTyping, state.chapterData.index, word.name])
 
