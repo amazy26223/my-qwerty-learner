@@ -35,9 +35,13 @@ export default defineConfig(async ({ mode }) => {
       rollupOptions: {
         output: {
           /**
-           * 拆分第三方依赖, 避免产出单个 ~1.6MB 的入口包。
+           * 拆分基础依赖, 避免产出单个 ~1.6MB 的入口包。
            * 原因: GitHub Pages 在国内网络下大文件下载容易被中断(ERR_CONNECTION_CLOSED → 白屏),
            * 拆成多个小包后浏览器可并行下载, 单个包中断也只影响局部, 且配合 index.html 的重试脚本能自愈。
+           *
+           * 注意: 不要给所有 node_modules 兜底成一个 vendor chunk —— 那样会把只被懒加载页面
+           * (如「数据分析」用的 echarts) 的大库提前塞进入口包, 反而拖慢首屏。
+           * 这里只显式拆出框架级依赖, 其余交给 Rollup 跟随实际导入点分配。
            */
           manualChunks(id: string) {
             if (!id.includes('node_modules')) return undefined
@@ -49,7 +53,7 @@ export default defineConfig(async ({ mode }) => {
             if (['howler', 'use-sound'].includes(pkg)) return 'audio-vendor'
             if (['mixpanel-browser'].includes(pkg)) return 'analytics-vendor'
             if (['dexie', 'dexie-export-import', 'dexie-react-hooks', 'pako', 'file-saver'].includes(pkg)) return 'data-vendor'
-            return 'vendor'
+            return undefined
           },
         },
       },
