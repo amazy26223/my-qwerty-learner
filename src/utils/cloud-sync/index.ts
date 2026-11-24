@@ -1,7 +1,8 @@
-import type { CloudBackupPayload, CloudSyncConfig, SyncDirection, SyncResult } from './types'
+import type { CloudBackupPayload, CloudSyncConfig, CloudSyncState, SyncDirection, SyncResult } from './types'
 import { isSyncConfigUsable, loadCloudSyncConfig, loadCloudSyncState, markLocalDirty, saveCloudSyncState } from './storage'
 import { applyPayloadToBrowser, decodePayload, encodePayload, getDeviceTag, hashSnapshot, snapshotLocalData } from './engine'
-import { mergeConfigMaps, mergeDexieExports } from './merge'
+import { mergeConfigMaps, mergeDexieExports, stableHash } from './merge'
+import { showSyncNotice } from './notice'
 import type { DexieExportJSON } from './types'
 
 export { DEFAULT_CLOUD_SYNC_CONFIG, loadCloudSyncConfig, saveCloudSyncConfig, isSyncConfigUsable, getCloudSyncStateLastSyncedAt, markLocalDirty } from './storage'
@@ -17,6 +18,27 @@ export { mergeConfigMaps, mergeDexieExports } from './merge'
  *   学习记录按自然键做并集合并 (追加式数据双端全保留), 配置按键级三方合并;
  *   合并结果同时写回本地与云端, 因此任何一台设备的数据都不会丢。
  */
+
+function hashDatabase(payload: CloudBackupPayload): string {
+  return stableHash(JSON.stringify(payload.database))
+}
+
+/** 合并本地与云端快照 (记录并集 + 配置键级三方合并) */
+function buildMergedPayload(
+  local: CloudBackupPayload,
+  remote: CloudBackupPayload,
+  state: CloudSyncState | undefined,
+): CloudBackupPayload {
+  return {
+    format: 'qwerty-learner-cloud-backup',
+    version: 1,
+    exportedAt: Date.now(),
+    deviceTag: getDeviceTag(),
+    // 首次在新设备上启用时没有 state, 以本地配置为 base → 全部采纳远端配置
+    config: mergeConfigMaps(local.config, remote.config, state?.lastSyncedConfig ?? local.config),
+    database: mergeDexieExports(local.database as DexieExportJSON, remote.database as DexieExportJSON),
+  }
+}
 
 async function doSync(direction: SyncDirection): Promise<SyncResult> {
   const config = loadCloudSyncConfig()
@@ -78,12 +100,24 @@ async function doSync(direction: SyncDirection): Promise<SyncResult> {
   }
 
   if (!localDirty && remoteChanged) {
-    await applyPayloadToBrowser(remotePayload)
+    const local = await snapshotLocalData()
+    // 始终做并集合并而不是直接覆盖: 万一本地存在"未标记上传"的记录(例如状态标记异常/被清理),
+    // 直接覆盖会把这些记录抹掉。合并是幂等的, 本地为空时结果与直接拉取等价。
+    const merged = buildMergedPayload(local.payload, remotePayload, state)
+    await applyPayloadToBrowser(merged)
+
+    const localHadExtra = hashDatabase(merged) !== hashDatabase(remotePayload)
+    if (localHadExtra) {
+      // 本地含云端没有的记录, 把合并结果回传, 避免这些记录只停留在本机
+      await uploadPayload(config, merged)
+    }
+
+    const effective = localHadExtra ? merged : remotePayload
     saveCloudSyncState({
       lastSyncedAt: Date.now(),
-      lastSyncedHash: hashSnapshot(remotePayload),
-      lastSyncedExportedAt: remotePayload.exportedAt,
-      lastSyncedConfig: remotePayload.config,
+      lastSyncedHash: hashSnapshot(effective),
+      lastSyncedExportedAt: effective.exportedAt,
+      lastSyncedConfig: effective.config,
       localDirty: false,
     })
     return { outcome: 'pulled', message: '已拉取云端较新的数据，建议刷新页面使配置生效' }
@@ -103,15 +137,7 @@ async function doSync(direction: SyncDirection): Promise<SyncResult> {
   }
 
   // 双端都有变化: 记录级合并, 保证两边的数据都不丢
-  const merged: CloudBackupPayload = {
-    format: 'qwerty-learner-cloud-backup',
-    version: 1,
-    exportedAt: Date.now(),
-    deviceTag: getDeviceTag(),
-    // 首次在新设备上启用时没有 state, 以本地配置为 base → 全部采纳远端配置
-    config: mergeConfigMaps(local.payload.config, remotePayload.config, state?.lastSyncedConfig ?? local.payload.config),
-    database: mergeDexieExports(local.payload.database as DexieExportJSON, remotePayload.database as DexieExportJSON),
-  }
+  const merged = buildMergedPayload(local.payload, remotePayload, state)
   await applyPayloadToBrowser(merged)
   const bytes = await uploadPayload(config, merged)
   saveCloudSyncState({
@@ -131,6 +157,15 @@ export function syncNow(direction: SyncDirection): Promise<SyncResult> {
   if (inFlight) return inFlight
   inFlight = doSync(direction)
     .catch((error): SyncResult => ({ outcome: 'error', message: error instanceof Error ? error.message : String(error) }))
+    .then((result) => {
+      // 失败要显眼: 以前错误只显示在设置面板的小字里, 用户容易以为同步成功了
+      if (result.outcome === 'error') {
+        showSyncNotice(`云同步失败：${result.message}`)
+      } else if (result.outcome === 'no-config') {
+        showSyncNotice('云同步未配置：请到「设置 → 数据设置 → 云端同步」填写 Owner / Repo / Token 并保存')
+      }
+      return result
+    })
     .finally(() => {
       inFlight = null
     })
@@ -247,10 +282,33 @@ function ghHeaders(config: CloudSyncConfig): HeadersInit {
   }
 }
 
+/** 把 GitHub 的状态码翻译成用户能照着处理的话 */
+function describeGitHubError(status: number, body: string): string {
+  const detail = body.replace(/\s+/g, ' ').slice(0, 200)
+  switch (status) {
+    case 401:
+      return 'Token 无效或已过期，请到 GitHub 重新生成后更新配置'
+    case 403:
+      return `权限不足或触发限流（需要该仓库的 Contents: Read and write 权限）：${detail}`
+    case 404:
+      return '仓库或备份路径不存在，或 Token 未授权访问该仓库'
+    case 409:
+      return '云端文件已被其它设备更新，正在重试'
+    case 422:
+      return `备份文件被 GitHub 拒绝：${detail}`
+    default:
+      return `GitHub API ${status}：${detail}`
+  }
+}
+
+function githubError(status: number, body: string): Error {
+  return new Error(`${describeGitHubError(status, body)}（HTTP ${status}）`)
+}
+
 async function ghGetFile(config: CloudSyncConfig): Promise<{ sha: string; content: string } | null> {
   const res = await fetch(contentsUrl(config), { headers: ghHeaders(config) })
   if (res.status === 404) return null
-  if (!res.ok) throw new Error(`GitHub API ${res.status}: ${(await res.text()).slice(0, 300)}`)
+  if (!res.ok) throw githubError(res.status, await res.text())
   const json = await res.json()
   if (typeof json.content !== 'string' || json.encoding !== 'base64') {
     throw new Error('GitHub 返回的文件内容格式异常')
@@ -265,7 +323,7 @@ async function ghPutFile(config: CloudSyncConfig, base64: string, sha: string | 
   }
   if (sha) body.sha = sha
   const res = await fetch(contentsUrl(config), { method: 'PUT', headers: ghHeaders(config), body: JSON.stringify(body) })
-  if (!res.ok) throw new Error(`GitHub API ${res.status}: ${(await res.text()).slice(0, 300)}`)
+  if (!res.ok) throw githubError(res.status, await res.text())
 }
 
 async function uploadPayload(config: CloudSyncConfig, payload: CloudBackupPayload): Promise<number> {
