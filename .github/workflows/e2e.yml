@@ -1,9 +1,8 @@
 name: Qwerty E2E Workflows
 on:
-  push:
-    branches:
-      - master
-      - dev/e2e
+  # 该工作流是上游的完整 E2E 套件, 需要 Playwright 环境与额外配置;
+  # 本仓库仅用于个人部署, 改为手动触发, 避免每次推送都产生与部署无关的红色失败
+  workflow_dispatch:
 jobs:
   e2e:
     runs-on: ubuntu-latest
