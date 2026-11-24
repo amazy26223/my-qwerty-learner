@@ -191,6 +191,33 @@
         document.documentElement.classList.add('dark')
       }
     </script>
+
+    <script>
+      // 网络不稳时, 大 JS 包可能在下载中途断开(表现为白屏)。
+      // 这里监听脚本加载失败, 自动重试一次(用 sessionStorage 防止无限刷新)。
+      ;(function () {
+        var RETRY_KEY = '__qwerty_script_retry'
+        window.addEventListener(
+          'error',
+          function (event) {
+            var target = event.target
+            if (!target || target.tagName !== 'SCRIPT') return
+            var src = target.src || ''
+            if (!/(assets|src)\/.*\.js/.test(src)) return
+            if (sessionStorage.getItem(RETRY_KEY) === '1') return
+            sessionStorage.setItem(RETRY_KEY, '1')
+            window.location.reload()
+          },
+          true,
+        )
+        // 应用正常启动后清除标记, 下次异常仍可重试
+        window.addEventListener('load', function () {
+          window.setTimeout(function () {
+            if (document.querySelector('#root > *')) sessionStorage.removeItem(RETRY_KEY)
+          }, 3000)
+        })
+      })()
+    </script>
   </head>
   <body>
     <noscript>
