@@ -6,6 +6,7 @@ import MobilePage from './pages/Mobile'
 import TypingPage from './pages/Typing'
 import { initCloudSyncOnStartup } from '@/utils/cloud-sync'
 import { isOpenDarkModeAtom } from '@/store'
+import { getDeployBasePath } from '@/utils/deployBase'
 import { Analytics } from '@vercel/analytics/react'
 import 'animate.css'
 import { useAtomValue } from 'jotai'
@@ -51,13 +52,12 @@ function Root() {
     initCloudSyncOnStartup()
   }, [])
 
-  // GitHub Pages 部署时按实际访问路径推导路由 basename (如 /my-qwerty-learner/),
-  // 官方站的 '/qwerty-learner' 是写死的, 换仓库名部署会路由失效
-  const pagesBaseName = REACT_APP_DEPLOY_ENV === 'pages' ? `/${window.location.pathname.split('/')[1] ?? ''}` : ''
+  // GitHub Pages 部署时按实际访问路径推导路由 basename (上游写死了官方站仓库名)
+  const pagesBaseName = getDeployBasePath()
 
   return (
     <React.StrictMode>
-      <BrowserRouter basename={pagesBaseName === '/' ? '' : pagesBaseName}>
+      <BrowserRouter basename={pagesBaseName}>
         <Suspense fallback={<Loading />}>
           <Routes>
             {isMobile ? (
