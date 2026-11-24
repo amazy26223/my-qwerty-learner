@@ -51,9 +51,13 @@ function Root() {
     initCloudSyncOnStartup()
   }, [])
 
+  // GitHub Pages 部署时按实际访问路径推导路由 basename (如 /my-qwerty-learner/),
+  // 官方站的 '/qwerty-learner' 是写死的, 换仓库名部署会路由失效
+  const pagesBaseName = REACT_APP_DEPLOY_ENV === 'pages' ? `/${window.location.pathname.split('/')[1] ?? ''}` : ''
+
   return (
     <React.StrictMode>
-      <BrowserRouter basename={REACT_APP_DEPLOY_ENV === 'pages' ? '/qwerty-learner' : ''}>
+      <BrowserRouter basename={pagesBaseName === '/' ? '' : pagesBaseName}>
         <Suspense fallback={<Loading />}>
           <Routes>
             {isMobile ? (
