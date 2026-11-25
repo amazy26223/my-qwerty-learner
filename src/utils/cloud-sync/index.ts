@@ -125,6 +125,19 @@ async function doSync(direction: SyncDirection): Promise<SyncResult> {
 
   const local = await snapshotLocalData()
   if (!remoteChanged) {
+    // 内容与上次同步完全相同(例如脏标记来自合并/导入本身), 不重复上传,
+    // 避免制造大量无意义的提交历史, 也减少与其它页面撞车的机会
+    if (state?.lastSyncedHash && state.lastSyncedHash === local.hash) {
+      saveCloudSyncState({
+        lastSyncedAt: Date.now(),
+        lastSyncedHash: local.hash,
+        lastSyncedExportedAt: state.lastSyncedExportedAt,
+        lastSyncedConfig: state.lastSyncedConfig,
+        localDirty: false,
+      })
+      return { outcome: 'up-to-date', message: '本地与云端已一致' }
+    }
+
     const bytes = await uploadPayload(config, local.payload)
     saveCloudSyncState({
       lastSyncedAt: Date.now(),
@@ -152,10 +165,54 @@ async function doSync(direction: SyncDirection): Promise<SyncResult> {
 
 let inFlight: Promise<SyncResult> | null = null
 
-/** 执行一次同步; 并发调用会共享同一个进行中的 Promise */
+const SYNC_LOCK_KEY = 'cloudSyncLock'
+const SYNC_LOCK_TTL = 15 * 1000
+
+/**
+ * 跨标签页互斥锁: 同一个浏览器的多个标签页共用 localStorage,
+ * 用它保证同一时刻只有一个页面在同步, 避免两个标签页同时上传同一文件而被 GitHub 判为冲突(409)。
+ */
+function acquireSyncLock(): boolean {
+  try {
+    const raw = localStorage.getItem(SYNC_LOCK_KEY)
+    const now = Date.now()
+    if (raw) {
+      const startedAt = Number(raw)
+      if (Number.isFinite(startedAt) && now - startedAt < SYNC_LOCK_TTL) return false
+    }
+    localStorage.setItem(SYNC_LOCK_KEY, String(now))
+    return true
+  } catch {
+    // 隐私模式下 localStorage 不可写时退化为不加锁
+    return true
+  }
+}
+
+function releaseSyncLock() {
+  try {
+    localStorage.removeItem(SYNC_LOCK_KEY)
+  } catch {
+    // 忽略
+  }
+}
+
+/** 执行一次同步; 同一页面并发调用共享同一个 Promise, 跨标签页用锁串行化 */
 export function syncNow(direction: SyncDirection): Promise<SyncResult> {
   if (inFlight) return inFlight
-  inFlight = doSync(direction)
+  inFlight = (async (): Promise<SyncResult> => {
+    if (!acquireSyncLock()) {
+      // 另一个标签页正在同步, 稍等再试一次; 仍被占用则跳过本次(不打扰用户)
+      await new Promise((resolve) => window.setTimeout(resolve, 1500))
+      if (!acquireSyncLock()) {
+        return { outcome: 'up-to-date', message: '另一处正在同步，本次已跳过' }
+      }
+    }
+    try {
+      return await doSync(direction)
+    } finally {
+      releaseSyncLock()
+    }
+  })()
     .catch((error): SyncResult => ({ outcome: 'error', message: error instanceof Error ? error.message : String(error) }))
     .then((result) => {
       // 失败要显眼: 以前错误只显示在设置面板的小字里, 用户容易以为同步成功了
@@ -293,7 +350,7 @@ function describeGitHubError(status: number, body: string): string {
     case 404:
       return '仓库或备份路径不存在，或 Token 未授权访问该仓库'
     case 409:
-      return '云端文件已被其它设备更新，正在重试'
+      return '云端文件正被另一处同步写入（另一个标签页或设备）'
     case 422:
       return `备份文件被 GitHub 拒绝：${detail}`
     default:
@@ -328,16 +385,32 @@ async function ghPutFile(config: CloudSyncConfig, base64: string, sha: string | 
 
 async function uploadPayload(config: CloudSyncConfig, payload: CloudBackupPayload): Promise<number> {
   const base64 = await encodePayload(payload)
-  const existing = await ghGetFile(config)
-  try {
-    await ghPutFile(config, base64, existing?.sha)
-  } catch (error) {
-    // 远端在 GET 与 PUT 之间被其它设备更新过 (sha 失效), 重取 sha 再试一次
-    const latest = await ghGetFile(config)
-    if (!latest) throw error
-    await ghPutFile(config, base64, latest.sha)
+
+  // GitHub 的"更新文件"接口要求带上当前文件的版本号(sha)。若两个同步并发写同一文件,
+  // 后提交者会拿到 409 Conflict。这里最多重试 3 次, 每次重新取 sha 并做短暂退避。
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const existing = await ghGetFile(config)
+    try {
+      await ghPutFile(config, base64, existing?.sha)
+      return base64.length
+    } catch (error) {
+      lastError = error
+      if (!isConflictError(error)) throw error
+      // 400ms, 900ms 的退避 + 抖动, 避免两个页面继续同步撞车
+      await new Promise((resolve) => window.setTimeout(resolve, 400 + attempt * 500 + Math.random() * 300))
+    }
   }
-  return base64.length
+
+  throw new Error(
+    `云端备份文件正在被另一处同步写入（可能是另一个标签页或设备同时同步）。本次未上传成功，稍等几秒会自动重试。${
+      lastError instanceof Error ? `（${lastError.message}）` : ''
+    }`,
+  )
+}
+
+function isConflictError(error: unknown): boolean {
+  return error instanceof Error && /HTTP 409|409/.test(error.message)
 }
 
 function formatBytes(length: number): string {
