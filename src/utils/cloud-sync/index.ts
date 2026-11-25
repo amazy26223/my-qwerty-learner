@@ -362,8 +362,23 @@ function githubError(status: number, body: string): Error {
   return new Error(`${describeGitHubError(status, body)}（HTTP ${status}）`)
 }
 
+/**
+ * 读取云端备份文件 (含版本号 sha)。
+ *
+ * 必须绕过浏览器 HTTP 缓存: GitHub API 的响应带有 max-age=60 的缓存头,
+ * 上传成功后的 60 秒内再次同步会命中缓存、拿到**过期的 sha**,
+ * 用它去提交会被 GitHub 判为冲突(HTTP 409), 而且重试读到的还是同一份缓存。
+ * 这正是"偶尔提示被其他设备占用、但其实只有一台设备"的根因。
+ */
 async function ghGetFile(config: CloudSyncConfig): Promise<{ sha: string; content: string } | null> {
-  const res = await fetch(contentsUrl(config), { headers: ghHeaders(config) })
+  const res = await fetch(contentsUrl(config), {
+    cache: 'no-store',
+    headers: {
+      ...ghHeaders(config),
+      'Cache-Control': 'no-cache, no-store, max-age=0',
+      Pragma: 'no-cache',
+    },
+  })
   if (res.status === 404) return null
   if (!res.ok) throw githubError(res.status, await res.text())
   const json = await res.json()
@@ -403,7 +418,7 @@ async function uploadPayload(config: CloudSyncConfig, payload: CloudBackupPayloa
   }
 
   throw new Error(
-    `云端备份文件正在被另一处同步写入（可能是另一个标签页或设备同时同步）。本次未上传成功，稍等几秒会自动重试。${
+    `云端备份文件版本与本地不一致（可能有其它客户端同时在同步）。本次未上传成功，稍后会自动重试，数据不会丢失。${
       lastError instanceof Error ? `（${lastError.message}）` : ''
     }`,
   )
