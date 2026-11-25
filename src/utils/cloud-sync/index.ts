@@ -328,8 +328,9 @@ export function scheduleAutoUpload() {
 function contentsUrl(config: CloudSyncConfig, cacheBuster?: number): string {
   const path = config.path.split('/').filter(Boolean).map(encodeURIComponent).join('/')
   const base = `https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/contents/${path}`
-  // 查询串变化即可让浏览器重新走网络, 拿到最新的 sha
-  return cacheBuster ? `${base}?ref=main&_=${cacheBuster}` : base
+  // 查询串变化即可让浏览器重新走网络, 拿到最新的 sha。
+  // 只加一个 GitHub 不认识的 _ 参数(会被忽略), 不写死 ref=main, 以免默认分支改名后失效。
+  return cacheBuster ? `${base}?_=${cacheBuster}` : base
 }
 
 function ghHeaders(config: CloudSyncConfig): HeadersInit {
