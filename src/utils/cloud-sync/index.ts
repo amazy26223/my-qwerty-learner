@@ -325,9 +325,11 @@ export function scheduleAutoUpload() {
 // GitHub Contents API 传输层
 // ---------------------------------------------------------------------------
 
-function contentsUrl(config: CloudSyncConfig): string {
+function contentsUrl(config: CloudSyncConfig, cacheBuster?: number): string {
   const path = config.path.split('/').filter(Boolean).map(encodeURIComponent).join('/')
-  return `https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/contents/${path}`
+  const base = `https://api.github.com/repos/${encodeURIComponent(config.owner)}/${encodeURIComponent(config.repo)}/contents/${path}`
+  // 查询串变化即可让浏览器重新走网络, 拿到最新的 sha
+  return cacheBuster ? `${base}?ref=main&_=${cacheBuster}` : base
 }
 
 function ghHeaders(config: CloudSyncConfig): HeadersInit {
@@ -365,19 +367,17 @@ function githubError(status: number, body: string): Error {
 /**
  * 读取云端备份文件 (含版本号 sha)。
  *
- * 必须绕过浏览器 HTTP 缓存: GitHub API 的响应带有 max-age=60 的缓存头,
- * 上传成功后的 60 秒内再次同步会命中缓存、拿到**过期的 sha**,
- * 用它去提交会被 GitHub 判为冲突(HTTP 409), 而且重试读到的还是同一份缓存。
+ * 必须避免用到浏览器的过期缓存: GitHub API 的响应带 max-age=60 缓存头, 上传成功后的
+ * 60 秒内再次同步会命中缓存、拿到**过期的 sha**, 用它提交会被判冲突(HTTP 409),
  * 这正是"偶尔提示被其他设备占用、但其实只有一台设备"的根因。
+ *
+ * 不能用 Cache-Control / Pragma 请求头来绕缓存: 它们不在 GitHub 的 CORS 允许头列表中,
+ * 会被预检(OPTIONS)拦下并表现为 "Failed to fetch"。这里改用变化的查询参数(cache buster)。
  */
 async function ghGetFile(config: CloudSyncConfig): Promise<{ sha: string; content: string } | null> {
-  const res = await fetch(contentsUrl(config), {
+  const res = await fetch(contentsUrl(config, Date.now()), {
     cache: 'no-store',
-    headers: {
-      ...ghHeaders(config),
-      'Cache-Control': 'no-cache, no-store, max-age=0',
-      Pragma: 'no-cache',
-    },
+    headers: ghHeaders(config),
   })
   if (res.status === 404) return null
   if (!res.ok) throw githubError(res.status, await res.text())
