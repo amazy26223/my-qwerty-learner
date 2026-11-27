@@ -197,6 +197,19 @@ function releaseSyncLock() {
 }
 
 /** 执行一次同步; 同一页面并发调用共享同一个 Promise, 跨标签页用锁串行化 */
+let networkRetryTimer: number | undefined
+let networkFailureStreak = 0
+
+/** 网络类失败(连不上/超时)自动再试, 成功则清零; 连续失败 2 次才打扰用户 */
+function scheduleNetworkRetry(direction: SyncDirection) {
+  if (networkRetryTimer) return
+  networkRetryTimer = window.setTimeout(() => {
+    networkRetryTimer = undefined
+    syncNow(direction).catch(() => undefined)
+  }, 8000)
+}
+
+/** 执行一次同步; 同一页面并发调用共享同一个 Promise, 跨标签页用锁串行化 */
 export function syncNow(direction: SyncDirection): Promise<SyncResult> {
   if (inFlight) return inFlight
   inFlight = (async (): Promise<SyncResult> => {
@@ -215,11 +228,22 @@ export function syncNow(direction: SyncDirection): Promise<SyncResult> {
   })()
     .catch((error): SyncResult => ({ outcome: 'error', message: error instanceof Error ? error.message : String(error) }))
     .then((result) => {
-      // 失败要显眼: 以前错误只显示在设置面板的小字里, 用户容易以为同步成功了
       if (result.outcome === 'error') {
-        showSyncNotice(`云同步失败：${result.message}`)
+        const isNetwork = /无法连接 GitHub|连接 GitHub 超时|GitHub 服务端错误/.test(result.message)
+        if (isNetwork && networkFailureStreak < 2) {
+          // 网络抖动很常见: 静默重试, 连续两次仍失败才弹提示
+          networkFailureStreak += 1
+          console.warn(`[cloud-sync] 网络异常(${networkFailureStreak}/2), 8 秒后自动重试:`, result.message)
+          scheduleNetworkRetry(direction)
+        } else {
+          showSyncNotice(`云同步失败：${result.message}`)
+        }
       } else if (result.outcome === 'no-config') {
+        networkFailureStreak = 0
         showSyncNotice('云同步未配置：请到「设置 → 数据设置 → 云端同步」填写 Owner / Repo / Token 并保存')
+      } else {
+        // 只要有一次成功就清空计数
+        networkFailureStreak = 0
       }
       return result
     })
@@ -365,6 +389,53 @@ function githubError(status: number, body: string): Error {
   return new Error(`${describeGitHubError(status, body)}（HTTP ${status}）`)
 }
 
+class NetworkError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NetworkError'
+  }
+}
+
+/**
+ * 带超时与重试的 fetch。
+ *
+ * 国内网络访问 api.github.com 会偶发连接被重置/超时, 表现为 fetch 抛
+ * TypeError("Failed to fetch"); 单次失败不该让整次同步报错, 这里自动重试。
+ * 4xx 是业务错误(令牌/权限), 不重试; 5xx 与网络错误重试。
+ */
+async function fetchWithRetry(url: string, init: RequestInit, attempts = 3, timeoutMs = 25000): Promise<Response> {
+  let lastError: unknown
+  let lastServerStatus = 0
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const controller = new AbortController()
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const res = await fetch(url, { ...init, signal: controller.signal })
+      if (res.status >= 500 && attempt < attempts - 1) {
+        lastServerStatus = res.status
+        lastError = new NetworkError(`GitHub 服务端错误 ${res.status}`)
+      } else {
+        return res
+      }
+    } catch (error) {
+      lastError = error
+    } finally {
+      window.clearTimeout(timer)
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 600 + attempt * 900 + Math.random() * 400))
+  }
+
+  if (lastServerStatus) {
+    throw new NetworkError(`GitHub 服务端错误 ${lastServerStatus}，稍后自动重试`)
+  }
+  const detail = lastError instanceof Error ? lastError.message : String(lastError)
+  throw new NetworkError(
+    /abort/i.test(detail)
+      ? '连接 GitHub 超时（网络较慢，可稍后重试或开启代理）'
+      : '无法连接 GitHub（网络被拦截或不通，建议开启代理后重试）',
+  )
+}
+
 /**
  * 读取云端备份文件 (含版本号 sha)。
  *
@@ -376,7 +447,7 @@ function githubError(status: number, body: string): Error {
  * 会被预检(OPTIONS)拦下并表现为 "Failed to fetch"。这里改用变化的查询参数(cache buster)。
  */
 async function ghGetFile(config: CloudSyncConfig): Promise<{ sha: string; content: string } | null> {
-  const res = await fetch(contentsUrl(config, Date.now()), {
+  const res = await fetchWithRetry(contentsUrl(config, Date.now()), {
     cache: 'no-store',
     headers: ghHeaders(config),
   })
@@ -395,7 +466,11 @@ async function ghPutFile(config: CloudSyncConfig, base64: string, sha: string | 
     content: base64,
   }
   if (sha) body.sha = sha
-  const res = await fetch(contentsUrl(config), { method: 'PUT', headers: ghHeaders(config), body: JSON.stringify(body) })
+  const res = await fetchWithRetry(contentsUrl(config), {
+    method: 'PUT',
+    headers: ghHeaders(config),
+    body: JSON.stringify(body),
+  })
   if (!res.ok) throw githubError(res.status, await res.text())
 }
 
