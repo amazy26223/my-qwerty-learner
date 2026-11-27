@@ -230,10 +230,10 @@ export function syncNow(direction: SyncDirection): Promise<SyncResult> {
     .then((result) => {
       if (result.outcome === 'error') {
         const isNetwork = /无法连接 GitHub|连接 GitHub 超时|GitHub 服务端错误/.test(result.message)
-        if (isNetwork && networkFailureStreak < 2) {
-          // 网络抖动很常见: 静默重试, 连续两次仍失败才弹提示
+        if (isNetwork && networkFailureStreak < 1) {
+          // 网络抖动很常见: 先静默重试一次, 仍失败才提示
           networkFailureStreak += 1
-          console.warn(`[cloud-sync] 网络异常(${networkFailureStreak}/2), 8 秒后自动重试:`, result.message)
+          console.warn(`[cloud-sync] 网络异常, 8 秒后自动重试:`, result.message)
           scheduleNetworkRetry(direction)
         } else {
           showSyncNotice(`云同步失败：${result.message}`)
