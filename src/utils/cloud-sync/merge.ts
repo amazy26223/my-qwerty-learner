@@ -35,6 +35,10 @@ function naturalKeyOf(tableName: string, row: DexieExportRow): string {
       return `c|${String(row.dict ?? '')}|${String(row.chapter ?? '')}|${String(row.timeStamp ?? '')}`
     case 'reviewRecords':
       return `r|${String(row.dict ?? '')}|${String(row.createTime ?? '')}`
+    case 'practiceSessions':
+      // 学习会话以「开始时间」为自然键: 同一次练习(可能被本地更新过 endTime/时长)在多设备、
+      // 多次回填之间只会保留一条, 内容以本地(较新)一侧为准。
+      return `p|${String(row.startTime ?? '')}`
     default: {
       const { id: _id, ...rest } = row
       return `g|${stableStringify(rest)}`

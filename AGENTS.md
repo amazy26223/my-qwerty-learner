@@ -14,7 +14,8 @@
 - 云同步 UI：`src/pages/Typing/components/Setting/DataSetting.tsx`
 - 部署基路径：`src/utils/deployBase.ts`（上游写死 `/qwerty-learner` 的坑已修，勿回退）
 - 构建拆包：`vite.config.ts` 的 `manualChunks`
-- 数据库：`src/utils/db/index.ts`（RecordDB）
+- 数据库：`src/utils/db/index.ts`（RecordDB，v4 起含 `practiceSessions`）
+- 学习记录（会话 + 时长统计）：`src/utils/practice/`（切分/回填/记录器/聚合）+ `src/pages/Records/`（`/records` 页面）
 
 ## 线上
 

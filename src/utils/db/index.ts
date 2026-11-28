@@ -3,6 +3,7 @@ import { ChapterRecord, ReviewRecord, WordRecord } from './record'
 import { TypingContext, TypingStateActionType } from '@/pages/Typing/store'
 import type { TypingState } from '@/pages/Typing/store/type'
 import { currentChapterAtom, currentDictIdAtom, isReviewModeAtom } from '@/store'
+import type { IPracticeSession } from '@/utils/practice/types'
 import type { Table } from 'dexie'
 import Dexie from 'dexie'
 import { useAtomValue } from 'jotai'
@@ -12,6 +13,8 @@ class RecordDB extends Dexie {
   wordRecords!: Table<IWordRecord, number>
   chapterRecords!: Table<IChapterRecord, number>
   reviewRecords!: Table<IReviewRecord, number>
+  /** 学习会话（一次连续练习一条），见 src/utils/practice */
+  practiceSessions!: Table<IPracticeSession, number>
 
   revisionDictRecords!: Table<IRevisionDictRecord, number>
   revisionWordRecords!: Table<IWordRecord, number>
@@ -30,6 +33,13 @@ class RecordDB extends Dexie {
       wordRecords: '++id,word,timeStamp,dict,chapter,wrongCount,[dict+chapter]',
       chapterRecords: '++id,timeStamp,dict,chapter,time,[dict+chapter]',
       reviewRecords: '++id,dict,createTime,isFinished',
+    })
+    // v4: 学习会话表（会话记录 + 时长统计）。旧表定义保持不变，只新增表。
+    this.version(4).stores({
+      wordRecords: '++id,word,timeStamp,dict,chapter,wrongCount,[dict+chapter]',
+      chapterRecords: '++id,timeStamp,dict,chapter,time,[dict+chapter]',
+      reviewRecords: '++id,dict,createTime,isFinished',
+      practiceSessions: '++id,startTime,endTime,endedBy',
     })
   }
 }

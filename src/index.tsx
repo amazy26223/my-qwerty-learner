@@ -4,9 +4,10 @@ import { ErrorBook } from './pages/ErrorBook'
 import { FriendLinks } from './pages/FriendLinks'
 import MobilePage from './pages/Mobile'
 import TypingPage from './pages/Typing'
-import { initCloudSyncOnFocus, initCloudSyncOnStartup } from '@/utils/cloud-sync'
 import { isOpenDarkModeAtom } from '@/store'
+import { initCloudSyncOnFocus, initCloudSyncOnStartup } from '@/utils/cloud-sync'
 import { getDeployBasePath } from '@/utils/deployBase'
+import { initPracticeSessions } from '@/utils/practice'
 import { Analytics } from '@vercel/analytics/react'
 import 'animate.css'
 import { useAtomValue } from 'jotai'
@@ -19,6 +20,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
 const AnalysisPage = lazy(() => import('./pages/Analysis'))
 const GalleryPage = lazy(() => import('./pages/Gallery-N'))
+const RecordsPage = lazy(() => import('./pages/Records'))
 
 if (process.env.NODE_ENV === 'production') {
   // for prod
@@ -48,10 +50,17 @@ function Root() {
   }, [])
 
   useEffect(() => {
-    // 云同步: 启动时后台拉取云端较新的数据 (可在 设置 → 数据 中配置/关闭)
-    initCloudSyncOnStartup()
-    // 云同步: 切回页面时自动检查云端更新 (别的设备练完上传后, 这台电脑无需手动刷新)
-    initCloudSyncOnFocus()
+    // 学习记录: 先用已有的 wordRecords/chapterRecords 重建历史会话(只读原始记录),
+    // 再启动实时记录器。顺序很重要——回填必须早于记录器挂上 Dexie 写入钩子。
+    // 完成后再启动云同步, 避免整库导入和回填抢同一批表 (导入会 clearTablesBeforeImport)。
+    initPracticeSessions()
+      .catch(() => undefined)
+      .finally(() => {
+        // 云同步: 启动时后台拉取云端较新的数据 (可在 设置 → 数据 中配置/关闭)
+        initCloudSyncOnStartup()
+        // 云同步: 切回页面时自动检查云端更新 (别的设备练完上传后, 这台电脑无需手动刷新)
+        initCloudSyncOnFocus()
+      })
   }, [])
 
   // GitHub Pages 部署时按实际访问路径推导路由 basename (上游写死了官方站仓库名)
@@ -69,6 +78,7 @@ function Root() {
                 <Route index element={<TypingPage />} />
                 <Route path="/gallery" element={<GalleryPage />} />
                 <Route path="/analysis" element={<AnalysisPage />} />
+                <Route path="/records" element={<RecordsPage />} />
                 <Route path="/error-book" element={<ErrorBook />} />
                 <Route path="/friend-links" element={<FriendLinks />} />
                 <Route path="/*" element={<Navigate to="/" />} />

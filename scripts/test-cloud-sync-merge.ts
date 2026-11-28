@@ -72,10 +72,16 @@ const reviews1 = rowsOf(merged1, 'reviewRecords')
 
 check('词记录 = 本地 apple + 去重 banana + 远端 cherry', words1.length === 3, `实际 ${words1.length}`)
 check('banana 只保留一份', words1.filter((row) => row.word === 'banana').length === 1)
-check('apple/banana/cherry 全部存在', ['apple', 'banana', 'cherry'].every((w) => words1.some((row) => row.word === w)))
+check(
+  'apple/banana/cherry 全部存在',
+  ['apple', 'banana', 'cherry'].every((w) => words1.some((row) => row.word === w)),
+)
 check('章节记录两条都在', chapters1.length === 2, `实际 ${chapters1.length}`)
 check('复习记录两条都在', reviews1.length === 2, `实际 ${reviews1.length}`)
-check('表元数据 rowCount 同步更新', merged1.data.tables.every((t) => t.rowCount === rowsOf(merged1, t.name).length))
+check(
+  '表元数据 rowCount 同步更新',
+  merged1.data.tables.every((t) => t.rowCount === rowsOf(merged1, t.name).length),
+)
 
 console.log('场景 1 附带校验: chapterRecord.wordRecordIds 重编址后指向正确')
 
@@ -187,6 +193,37 @@ console.log('场景 7: databaseVersion 取较大者, 保持 schema 前向兼容'
 const localExport7 = makeExport(3, { wordRecords: [], chapterRecords: [], reviewRecords: [] })
 const remoteExport7 = makeExport(4, { wordRecords: [], chapterRecords: [], reviewRecords: [], newV4Table: [] })
 check('合并后 databaseVersion = 4', mergeDexieExports(localExport7, remoteExport7).data.databaseVersion === 4)
+
+console.log('场景 8: 学习会话 (practiceSessions) 按开始时间做并集, 同会话保留本地较新版本')
+
+const localExport8 = makeExport(4, {
+  wordRecords: [],
+  chapterRecords: [],
+  reviewRecords: [],
+  practiceSessions: [
+    { startTime: 1000, endTime: 1600, activeSeconds: 500, wordCount: 20, endedBy: 'idle' },
+    { startTime: 5000, endTime: 5400, activeSeconds: 300, wordCount: 12, endedBy: 'live' },
+  ],
+})
+const remoteExport8 = makeExport(4, {
+  wordRecords: [],
+  chapterRecords: [],
+  reviewRecords: [],
+  practiceSessions: [
+    // 与本地第一条同一个会话(开始时间相同), 但内容更旧(落库时的中间态)
+    { startTime: 1000, endTime: 1200, activeSeconds: 100, wordCount: 5, endedBy: 'live' },
+    // 云端独有的一次会话(另一台设备练的)
+    { startTime: 9000, endTime: 9300, activeSeconds: 250, wordCount: 18, endedBy: 'idle' },
+  ],
+})
+const sessions8 = rowsOf(mergeDexieExports(localExport8, remoteExport8), 'practiceSessions')
+check('会话并集后 3 条 (同开始时间只留一条)', sessions8.length === 3, `实际 ${sessions8.length}`)
+check('同开始时间保留本地较新内容', sessions8.filter((row) => row.startTime === 1000)[0]?.wordCount === 20)
+check(
+  '云端独有会话被保留',
+  sessions8.some((row) => row.startTime === 9000),
+)
+check('会话行 id 连续且无重复', sessions8.map((row) => row.id).join(',') === '1,2,3')
 
 console.log('')
 

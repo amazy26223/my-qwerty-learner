@@ -61,6 +61,21 @@
 | `src/hooks/usePronunciation.ts` | 弃用 Howler，改原生 `Audio` + LRU 缓存 + 预取共用缓存 + 失败重试；修复「偶发无声、手动点才有声」 |
 | `src/pages/Typing/components/WordPanel/components/Word/index.tsx` | 换词自动播放去重（避免同一词触发两次互相打断） |
 
+### 3.4 学习记录（会话 + 时长统计，2026-11-28 上线）
+| 文件 | 作用 |
+| --- | --- |
+| `src/utils/practice/types.ts` | `IPracticeSession` 会话类型、`SessionEndedBy` 结束原因、时长文案 |
+| `src/utils/practice/session.ts` | **纯函数**：>5 分钟切分会话、双口径时长（activeSeconds/totalSeconds）、事件汇总 |
+| `src/utils/practice/recorder.ts` | 运行时记录器：挂 `wordRecords`/`chapterRecords` 的 Dexie `creating` 钩子 → 内存会话 → 每 20 秒 flush |
+| `src/utils/practice/backfill.ts` | 历史回填：用旧 `wordRecords`/`chapterRecords` 的 `timeStamp` 重建历史会话（幂等，只读原始表） |
+| `src/utils/practice/stats.ts` | 今日/本周/累计、连续天数、近 14 天每日活跃时长、按天分组（纯函数） |
+| `src/utils/practice/index.ts` | 对外入口：`initPracticeSessions()` / `loadPracticeSessions()` / 聚合 API |
+| `src/pages/Records/**` | 独立页面 `/records`（卡片 + 纯 CSS 柱状图 + 按天分组的会话列表） |
+| `src/pages/Typing/components/RecordsButton/index.tsx` | 顶部工具栏入口（挨着「查看数据统计」） |
+| `src/utils/db/index.ts` | `RecordDB` 升 **version 4**，新增 `practiceSessions: '++id,startTime,endTime,endedBy'` |
+| `src/utils/cloud-sync/merge.ts` | `practiceSessions` 的自然键 = `startTime`（见 4.5） |
+
+
 ## 4. 云同步机制要点（修改前必读，这些坑都踩过）
 
 1. **数据流**：本地 Dexie 全库 + localStorage 配置 → gzip → base64 → GitHub Contents API 单文件
@@ -73,6 +88,9 @@
    - 需要跨标签页互斥锁（localStorage 锁），否则多页面同时写会撞 409
    - 网络类失败要自动重试（`fetchWithRetry`，3 次退避 + 25s 超时），且**静默重试一次仍失败**才提示用户
    - 内容与上次同步哈希一致时不要重复上传（避免刷提交历史）
+5. **新增表要处理的两件事（学习记录踩过）**：
+   - `merge.ts` 的 `naturalKeyOf` 必须给新表一个自然键，否则会走到 `default` 分支「按整行内容去重」：同一条记录内容一变（例如会话在两次 flush 之间变长）就会变成两条
+   - 整库导入是 `clearTablesBeforeImport: true`，所以「数据表被清空后要能自愈」的逻辑（如历史回填的 `count() === 0` 判断）不要加永久标记
 
 ## 5. 数据现状（2026-11-28 备份实测，供功能设计参考）
 
@@ -87,16 +105,24 @@
 
 ## 6. 待开发功能（已与用户确认的范围）
 
-### A. 会话记录 + 时长统计（P0，必需）
-- 新 Dexie 表 `practiceSessions`（DB 升到 version 4），**随云同步自动备份**（全库导出已覆盖）
+### A. 会话记录 + 时长统计（P0）— **已实现（2026-11-28）**
+- 新 Dexie 表 `practiceSessions`（DB 升到 version 4），随云同步自动备份（全库导出已覆盖）
 - 字段：`startTime, endTime, activeSeconds, totalSeconds, chapterCount, wordCount, uniqueWordCount, correctCount, wrongCount, dicts[], chapters[], avgWpm, accuracy, endedBy`
 - 切分规则：相邻记录间隔 **> 5 分钟**断开
 - 双口径：`activeSeconds = Σ min(间隔, 60s)`；`totalSeconds = 末 − 首`
 - 历史回填：用现有 `wordRecords`/`chapterRecords` 的 `timeStamp` 一次性重建（不改动原始记录）
-- UI：**新建独立页面 `/records`**，顶部工具栏加图标入口（挨着「查看数据统计」）
+- UI：**独立页面 `/records`**，顶部工具栏加图标入口（挨着「查看数据统计」）
 - 页面内容：今日/本周/累计卡片 + 连续天数、近 14 天活跃时长柱状图、按天分组的会话列表
 
-### B. 键位错误热图（P1）
+实现要点 / 踩坑（改这块之前必读）：
+1. **事件源是 Dexie 写入钩子**（`wordRecords.create` / `chapterRecords.create`），所以打字页、错题本、复习模式全部自动覆盖，没动任何业务组件。
+2. **钩子会拦截云同步的批量导入** → 记录器只接受「时间戳距现在 ≤ 10 分钟」的事件（`EVENT_RECENCY_SECONDS`），否则一次 pull 就会凭空生成一个几千词、几小时长的假会话。
+3. **启动顺序**：`initPracticeSessions()` 先回填、后启动记录器（见 `src/index.tsx`），且云同步放在回填完成之后，避免整库导入和回填抢表。
+4. **结束原因** `endedBy`：`live`（每 20 秒 flush 的进行中状态）/ `idle`（5 分钟无事件）/ `hidden`（页面切走）/ `unload`（关页）/ `backfill`（历史重建）。页面隐藏后 5 分钟内回来继续练，仍算同一个会话（保证「>5 分钟才断开」的唯一口径）。
+5. **正确/错误口径**：会话里有章节记录就用章节的 `correctCount/wrongCount`（按键级，最准）；只有词记录（练到一半）时用 `timing.length + 1` 估算正确按键数。
+6. 统计与切分都是纯函数（`session.ts` / `stats.ts`），可以用 esbuild 打包后在 node 里直接跑断言，不必开浏览器。
+
+### B. 键位错误热图（P1，未做）
 - 现有 `Analysis` 页的「按键错误次数排行」统计的是**按错的键的绝对次数**（`e/a/i` 天然高频，误导），需重做指标
 - 新指标：**错误率** = 该字母出错次数 ÷ 该字母出现总次数（分母由所有词记录字母频次得出）
 - 混淆矩阵：`目标字母 → 实际按成什么`（TOP 榜）
