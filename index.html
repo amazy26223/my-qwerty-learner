@@ -1,7 +1,12 @@
 <!DOCTYPE html>
-<html lang="zh-Hans">
+<html lang="zh-Hans" translate="no">
   <head>
     <meta charset="UTF-8" />
+    <!-- 禁止浏览器/翻译扩展自动翻译整页：
+         这是单页应用，前端路由切换不重建页面，翻译扩展会在顶部插一条状态栏并记住旧 URL，
+         用户切回主界面后那条栏还在、点它的关闭会"还原"到旧页面（表现为白条 + 跳回上一页）。
+         translate="no" + notranslate class + google notranslate 三个信号一起给，Chrome/常用扩展都认。 -->
+    <meta name="google" content="notranslate" />
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-3FTEQXFKNF"></script>
     <script>
       window.dataLayer = window.dataLayer || []
@@ -219,7 +224,7 @@
       })()
     </script>
   </head>
-  <body>
+  <body class="notranslate">
     <noscript>
       <div>You need to enable JavaScript to run QWERTY Learner.</div>
       <div>你需要启用 JavaScript 来运行 QWERTY Learner。</div>
