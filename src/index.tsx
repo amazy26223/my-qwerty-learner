@@ -30,6 +30,11 @@ if (process.env.NODE_ENV === 'production') {
   mixpanel.init('5474177127e4767124c123b2d7846e2a', { debug: true })
 }
 
+// 这个修改版不向第三方上报使用数据: 这两个 token 是上游作者的 Mixpanel 项目,
+// 继续上报等于把本机练习数据写进别人的统计里。初始化后立刻 disable(), 让所有 track 变成空操作
+// (保留 init 是为了不让散落各处的 mixpanel.track 调用抛错)。
+mixpanel.disable()
+
 function Root() {
   const darkMode = useAtomValue(isOpenDarkModeAtom)
   useEffect(() => {

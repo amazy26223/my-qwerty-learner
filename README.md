@@ -30,6 +30,24 @@
 <img  src="docs/Screenshot.png"/>
 </div>
 
+## 关于这个仓库（修改版声明）
+
+本项目是 [RealKai42/qwerty-learner](https://github.com/RealKai42/qwerty-learner)（GPL-3.0）的**修改版**，由个人使用者维护，与上游作者无关，也**不是**上游的官方发行版。
+
+依据 GPL-3.0 第 5(a) 条「修改版必须显著声明改动」，在此列出改动范围（细节见 [docs/HANDOFF.md](./docs/HANDOFF.md) 第 3 节）：
+
+| 改动                                                                        | 涉及文件                                                                                    | 时间       |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ---------- |
+| 新增学习数据云同步（GitHub 私有仓库，记录级并集合并，不覆盖不丢数据）       | `src/utils/cloud-sync/**`、`src/pages/Typing/components/Setting/DataSetting.tsx`            | 2026-11    |
+| 部署基路径按实际访问路径推导（修复部署到子路径后词典/音效 404）             | `src/utils/deployBase.ts`、`src/utils/wordListFetcher.ts`、`src/resources/soundResource.ts` | 2026-11    |
+| 音频播放改用原生 `Audio` + LRU 缓存 + 失败重试                              | `src/hooks/usePronunciation.ts`                                                             | 2026-11    |
+| 新增「学习记录」会话与时长统计（`/records` 页面，DB v4 `practiceSessions`） | `src/utils/practice/**`、`src/pages/Records/**`                                             | 2026-11-28 |
+| 关闭整页自动翻译；移除上游的第三方统计上报                                  | `index.html`、`src/index.tsx`                                                               | 2026-11-28 |
+
+原始项目版权归上游作者所有，完整许可证见 [LICENSE](./LICENSE)（GPL-3.0），本修改版同样以 GPL-3.0 分发。
+
+另外说明两点：本部署**不上报**任何第三方统计（上游代码里的 Google Analytics 脚本与 Mixpanel 上报已移除，不再向第三方项目发送使用数据）；学习数据只保存在使用者自己的浏览器 IndexedDB 与私有备份仓库里。
+
 ## 📸 在线访问
 
 **首选部署**: <https://qwerty.kaiyi.cool/>

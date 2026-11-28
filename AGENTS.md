@@ -19,5 +19,5 @@
 
 ## 线上
 
-- 主站：https://amazy26223.github.io/my-qwerty-learner/
-- 数据备份仓库：https://github.com/amazy26223/qwerty-learner-backup （private）
+- 主站：`<你的 GitHub Pages 地址>`
+- 数据备份仓库：`<你的私有数据备份仓库>`（private，存 `data.gz`）

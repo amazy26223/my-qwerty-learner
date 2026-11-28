@@ -7,16 +7,10 @@
          用户切回主界面后那条栏还在、点它的关闭会"还原"到旧页面（表现为白条 + 跳回上一页）。
          translate="no" + notranslate class + google notranslate 三个信号一起给，Chrome/常用扩展都认。 -->
     <meta name="google" content="notranslate" />
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-3FTEQXFKNF"></script>
-    <script>
-      window.dataLayer = window.dataLayer || []
-      function gtag() {
-        dataLayer.push(arguments)
-      }
-      gtag('js', new Date())
-
-      gtag('config', 'G-3FTEQXFKNF')
-    </script>
+    <!--
+      上游在这里加载 Google Analytics（上游作者自己的 GA 资源）并向第三方上报使用数据。
+      本修改版不向任何第三方统计服务上报：移除 GA 脚本；mixpanel 在 src/index.tsx 里初始化后立即 disable()。
+    -->
 
     <script type="text/javascript">
       // Single Page Apps for GitHub Pages
