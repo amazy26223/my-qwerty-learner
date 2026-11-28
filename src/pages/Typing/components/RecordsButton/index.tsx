@@ -7,7 +7,9 @@ const RecordsButton = () => {
   const navigate = useNavigate()
 
   const toRecords = useCallback(() => {
-    navigate('/records')
+    // 带上来源标记：记录页据此用「历史回退」返回打字页，
+    // 不再往历史里追加一条 '/'（否则关掉记录页后按后退会又落回记录页）
+    navigate('/records', { state: { fromRecordsEntry: true } })
   }, [navigate])
 
   return (

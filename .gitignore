@@ -34,3 +34,6 @@ stats.html
 /blob-report/
 /playwright/.cache/
 playwright-report
+# 本地构建临时目录（vite/esbuild 用 TMP 指到仓库内时产生）
+/.tmp-build
+/CON

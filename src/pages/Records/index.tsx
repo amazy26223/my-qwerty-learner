@@ -9,7 +9,7 @@ import * as ScrollArea from '@radix-ui/react-scroll-area'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useCallback, useEffect, useMemo } from 'react'
 import { useHotkeys } from 'react-hotkeys-hook'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import IconFlame from '~icons/tabler/flame'
 import IconX from '~icons/tabler/x'
 
@@ -48,10 +48,22 @@ function RecordsEmptyState() {
 
 const Records = () => {
   const navigate = useNavigate()
+  const location = useLocation()
 
+  /**
+   * 返回打字页：
+   * - 从打字页工具栏点进来的（带了 state 标记）→ 直接用浏览器历史回退（navigate(-1)），
+   *   不再往历史里追加一条 '/'，避免"关掉记录页后按后退/关闭又落回 /records"的错觉
+   * - 直接输地址/刷新/收藏进来的 → 没有可回退的站内历史，回到首页
+   */
   const onBack = useCallback(() => {
+    const fromEntry = (location.state as { fromRecordsEntry?: boolean } | null)?.fromRecordsEntry === true
+    if (fromEntry && window.history.length > 1) {
+      navigate(-1)
+      return
+    }
     navigate('/')
-  }, [navigate])
+  }, [location.state, navigate])
 
   useHotkeys('enter,esc', onBack, { preventDefault: true })
 
